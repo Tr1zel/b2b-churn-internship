@@ -34,7 +34,60 @@ def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) ->
     3. Определить таргет по окну прогноза
     4. Склеить признаки + таргет + метаданные клиента
     """
-    raise NotImplementedError("Реализуйте на неделе 2")
+
+    snapshot_month = pd.Period(snapshot, freq="M")
+    start_observ = snapshot_month - 6
+    end_observ = snapshot_month - 1
+    start_predict = snapshot_month
+    end_predict = snapshot_month + 2
+
+    usage["month"] = pd.PeriodIndex(usage["month"], freq="M")
+
+    active_clients = usage.loc[
+        (usage["month"] == end_observ)
+        & (usage["revenue"] > 0),
+        "client_id"
+    ].unique()
+
+    history_active_clients = usage.loc[
+        usage["client_id"].isin(active_clients)
+        & (usage["month"].between(start_observ, end_observ))
+    ]
+    features = make_features(history_active_clients, end_observ)
+
+    predict_data = usage.loc[
+        usage["client_id"].isin(active_clients)
+        & usage["month"].between(start_predict, end_predict)
+    ]
+
+    last_revenue = (
+        history_active_clients.loc[
+            history_active_clients["month"] == end_observ
+        ].set_index("client_id")["revenue"]
+    )
+
+    future_revenue = (
+        predict_data.groupby("client_id")["revenue"].mean()
+    )
+
+    future_revenue = (
+        future_revenue.reindex(last_revenue.index).fillna(0)
+    )
+
+    target = (
+        future_revenue < 0.2 * last_revenue
+    ).astype(int)
+    target.name = "target"
+
+    result = features.join(target).reset_index()
+
+    result = result.merge(
+        clients[["client_id", "segment", "product", "region"]],
+        on="client_id",
+        how="left",
+    )
+    result["snapshot"] = str(snapshot_month)
+    return result
 
 
 def make_features(obs: pd.DataFrame, obs_end) -> pd.DataFrame:
@@ -55,7 +108,18 @@ def make_features(obs: pd.DataFrame, obs_end) -> pd.DataFrame:
     - объём отношений (число услуг, срок жизни)
     - сигналы боли (обращения в поддержку, задолженность)
     """
-    raise NotImplementedError("Реализуйте на неделе 3")
+
+
+    obs = obs.sort_values(["client_id", "month"])
+    obs_grouped = obs.groupby("client_id")
+
+    features = obs_grouped.agg(
+        rev_mean = ("revenue", "mean"),
+        rev_last = ("revenue", "last"),
+        traffic_mean = ("traffic_gb", "mean"),
+        sim_last = ("n_sim", "last")
+    )
+    return features
 
 
 def trend_slope(s: pd.Series) -> float:
