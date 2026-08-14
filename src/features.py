@@ -13,6 +13,7 @@ import pandas as pd
 
 OBSERVATION_MONTHS = 6  # окно наблюдения: сколько месяцев до snapshot
 FORECAST_MONTHS = 3      # окно прогноза: сколько месяцев после snapshot
+GAP_MONTHS = 2 # окно зазора
 
 
 def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) -> pd.DataFrame:
@@ -36,10 +37,11 @@ def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) ->
     """
 
     snapshot_month = pd.Period(snapshot, freq="M")
-    start_observ = snapshot_month - 6
-    end_observ = snapshot_month - 1
-    start_predict = snapshot_month
-    end_predict = snapshot_month + 2
+
+    start_observ = snapshot_month - OBSERVATION_MONTHS + 1 
+    end_observ = snapshot_month 
+    start_predict = snapshot_month + GAP_MONTHS + 1 
+    end_predict = start_predict + FORECAST_MONTHS - 1 
 
     usage["month"] = pd.PeriodIndex(usage["month"], freq="M")
 
