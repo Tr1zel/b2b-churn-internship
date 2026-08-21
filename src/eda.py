@@ -47,3 +47,47 @@ def churn_rate_by(df: pd.DataFrame, target_col: str, group_col: str) -> pd.DataF
         .rename(columns={"mean": "доля_оттока", "count": "клиентов"})
         .sort_values("доля_оттока", ascending=False)
     )
+
+def missing_months(usage: pd.DataFrame) -> pd.DataFrame:
+    """Дыры в помесячных данных клиента.
+
+    Для каждого клиента: первый месяц, последний месяц, сколько месяцев
+    фактически есть и сколько должно быть между первым и последним.
+
+    Отсутствие месяцев В СЕРЕДИНЕ истории клиента — это дыра в данных,
+    а не уход. Отличать одно от другого понадобится на неделе 2.
+
+    Returns
+    -------
+    DataFrame с индексом client_id и столбцами:
+        first_month, last_month, n_months_actual, n_months_expected, has_gap
+
+    TODO (неделя 1)
+    """
+
+    cp_usage = usage.copy()
+    cp_usage["month"] = pd.PeriodIndex(
+        cp_usage["month"],
+        freq="M"
+    )
+
+    grouped = cp_usage.groupby("client_id")
+
+    result = grouped.agg(
+        first_month = ("month", "min"),
+        last_month = ("month", "max"),
+        n_months_actual = ("month", "nunique")
+    )
+
+    result["n_months_expected"] = (
+        result["last_month"].astype("int64") - result["first_month"].astype("int64") + 1
+    )
+
+    result["has_gap"] = (
+        result["n_months_actual"] < result["n_months_expected"]
+    )
+
+    return result
+
+
+
