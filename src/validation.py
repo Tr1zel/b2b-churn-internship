@@ -55,7 +55,55 @@ def bootstrap_auc_diff(y_true, s1, s2, n_iter: int = 1000, seed: int = 42) -> di
         d = roc_auc_score(y_true[idx], s1[idx]) - roc_auc_score(y_true[idx], s2[idx])
         diffs.append(d)
         wins += d > 0
-    result = {"win_rate": wins / len(diffs), "mean_diff": float(np.mean(diffs))}
-    print(f"Подход 1 лучше в {result['win_rate']:.0%} выборок; "
-          f"средняя разница AUC = {result['mean_diff']:+.4f}")
+    if not diffs:
+        raise ValueError("Ни одна bootstrap-выборка не содержала оба класса")
+    lo, hi = np.percentile(diffs, [2.5, 97.5])
+    result = {
+        "win_rate": wins / len(diffs),
+        "mean_diff": float(np.mean(diffs)),
+        "ci_low": float(lo),
+        "ci_high": float(hi),
+        "significant": bool(lo > 0 or hi < 0),
+    }
+    print(f"Средняя разница AUC = {result['mean_diff']:+.4f}, "
+          f"95% интервал [{lo:+.4f}, {hi:+.4f}]")
+    print("Различие значимо" if result["significant"]
+          else "Различие НЕ значимо: интервал накрывает ноль")
     return result
+
+
+# --------------------------------------------------------------------------
+# Неделя 3: разбиение по времени
+# --------------------------------------------------------------------------
+
+# Схема с зазором. Между окнами прогноза train/valid и окном наблюдения теста
+# не должно быть ни одного общего месяца — иначе метрика на тесте завышена.
+# Снапшоты 2025-04, 2025-07, 2025-10 выброшены намеренно. См. тетрадь 7.2.
+TRAIN_SNAPSHOTS = ['2024-07', '2024-10']
+VALID_SNAPSHOTS = ['2025-01']
+TEST_SNAPSHOTS = ['2026-01']
+
+
+def split_by_time(dataset):
+    """Разбиение out-of-time с зазором.
+
+    Returns
+    -------
+    (train, valid, test) — три DataFrame
+
+    TODO (неделя 3): отфильтровать dataset по snapshot_date.
+    Случайного перемешивания здесь быть не должно.
+    """
+    train = dataset[
+        dataset["snapshot"].isin(["2024-07", "2024-10"])
+    ].copy()
+
+    valid = dataset[
+        dataset["snapshot"] == "2025-01"
+    ].copy()
+
+    test = dataset[
+        dataset["snapshot"] == "2026-01"
+    ].copy()
+
+    return train, valid, test
