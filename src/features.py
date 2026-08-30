@@ -14,7 +14,31 @@ import pandas as pd
 OBSERVATION_MONTHS = 6  # окно наблюдения: сколько месяцев до snapshot
 FORECAST_MONTHS = 3      # окно прогноза: сколько месяцев после snapshot
 GAP_MONTHS = 2 # окно зазора
+SNAPSHOTS = ['2024-07', '2024-10', '2025-01', '2025-04',
+             '2025-07', '2025-10', '2026-01']
 
+def window_bounds(snapshot: str):
+    """Границы окна наблюдения и окна прогноза.
+
+    Для snapshot = '2025-01':
+        окно наблюдения  2024-08 .. 2025-01   (снапшот входит сюда)
+        слепой зазор     2025-02 .. 2025-03   (не используется вообще)
+        окно прогноза    2025-04 .. 2025-06
+
+    Returns
+    -------
+    (obs_start, obs_end, fc_start, fc_end) — строки вида 'YYYY-MM'
+
+    TODO (неделя 2): реализовать через pd.Period, см. тетрадь 3.5
+    """
+
+    snapshot_month = pd.Period(snapshot, freq="M")
+
+    obs_start = snapshot_month - OBSERVATION_MONTHS + 1 
+    obs_end = snapshot_month 
+    fc_start = snapshot_month + GAP_MONTHS + 1 
+    fc_end = fc_start + FORECAST_MONTHS - 1
+    return obs_start, obs_end, fc_start, fc_end
 
 def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) -> pd.DataFrame:
     """Собирает обучающую выборку для одной точки отсчёта.
@@ -35,36 +59,30 @@ def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) ->
     3. Определить таргет по окну прогноза
     4. Склеить признаки + таргет + метаданные клиента
     """
-
-    snapshot_month = pd.Period(snapshot, freq="M")
-
-    start_observ = snapshot_month - OBSERVATION_MONTHS + 1 
-    end_observ = snapshot_month 
-    start_predict = snapshot_month + GAP_MONTHS + 1 
-    end_predict = start_predict + FORECAST_MONTHS - 1 
+    obs_start, obs_end, fc_start, fc_end = window_bounds(snapshot)
 
     usage["month"] = pd.PeriodIndex(usage["month"], freq="M")
 
     active_clients = usage.loc[
-        (usage["month"] == end_observ)
+        (usage["month"] == obs_end)
         & (usage["revenue"] > 0),
         "client_id"
     ].unique()
 
     history_active_clients = usage.loc[
         usage["client_id"].isin(active_clients)
-        & (usage["month"].between(start_observ, end_observ))
+        & (usage["month"].between(obs_start, obs_end))
     ]
-    features = make_features(history_active_clients, end_observ)
+    features = make_features(history_active_clients, obs_end)
 
     predict_data = usage.loc[
         usage["client_id"].isin(active_clients)
-        & usage["month"].between(start_predict, end_predict)
+        & usage["month"].between(fc_start, fc_end)
     ]
 
     last_revenue = (
         history_active_clients.loc[
-            history_active_clients["month"] == end_observ
+            history_active_clients["month"] == obs_end
         ].set_index("client_id")["revenue"]
     )
 
@@ -88,7 +106,7 @@ def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) ->
         on="client_id",
         how="left",
     )
-    result["snapshot"] = str(snapshot_month)
+    result["snapshot"] = str(pd.Period(snapshot, freq='M'))
     return result
 
 
@@ -117,10 +135,49 @@ def make_features(obs: pd.DataFrame, obs_end) -> pd.DataFrame:
 
     features = obs_grouped.agg(
         rev_mean = ("revenue", "mean"),
+        rev_min = ("revenue", "min"),
+        rev_max = ("revenue", "max"),
         rev_last = ("revenue", "last"),
         traffic_mean = ("traffic_gb", "mean"),
-        sim_last = ("n_sim", "last")
+        traffic_last = ("traffic_gb", "last"),
+        sim_last = ("n_sim", "last"),
+        sim_mean = ("n_sim", "mean"),
+        sum_tickets = ("n_tickets", "sum"),
+        last_tickets = ("n_tickets", "last"),
+        sum_debt = ("debt", "sum"),
+        last_debt = ("debt", "last"),
+        max_debt = ("debt", "max"),
+        month_in_obs = ("month", "nunique")
+
     )
+    features["rev_last_to_mean"] = (
+        features["rev_last"] /  (features["rev_mean"] + 1e-9)
+    )
+
+    features["rev_std"] = (
+        obs_grouped["revenue"].std().fillna(0)
+    )
+
+    features["rev_trend"] = (
+        obs_grouped["revenue"].apply(trend_slope)
+    )
+
+    features["traffic_trend"] = (
+        obs_grouped["traffic_gb"].apply(trend_slope)
+    )
+
+    features["rev_trend_norm"] = (
+        features["rev_trend"] / (features["rev_mean"] + 1e-9)
+    )
+
+    features["rev_months_declining"] = (
+        obs_grouped["revenue"].apply(months_declining)
+    )
+
+    features["sim_change"] = (
+        features["sim_last"] - obs_grouped["n_sim"].first()
+    )
+
     return features
 
 
