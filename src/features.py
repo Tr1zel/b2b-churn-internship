@@ -80,10 +80,8 @@ def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) ->
         & usage["month"].between(fc_start, fc_end)
     ]
 
-    last_revenue = (
-        history_active_clients.loc[
-            history_active_clients["month"] == obs_end
-        ].set_index("client_id")["revenue"]
+    observation_revenue = (
+        history_active_clients.groupby("client_id")["revenue"].mean()
     )
 
     future_revenue = (
@@ -91,11 +89,11 @@ def build_snapshot(usage: pd.DataFrame, clients: pd.DataFrame, snapshot: str) ->
     )
 
     future_revenue = (
-        future_revenue.reindex(last_revenue.index).fillna(0)
+        future_revenue.reindex(observation_revenue.index).fillna(0)
     )
 
     target = (
-        future_revenue < 0.2 * last_revenue
+        future_revenue < 0.2 * observation_revenue
     ).astype(int)
     target.name = "target"
 
